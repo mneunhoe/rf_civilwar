@@ -1,0 +1,777 @@
+---
+title: 'Replication Code for ''Is Random Forest Really Better than Logistic Regression
+  for Predicting Civil War Onsets?'' '
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+
+
+```{r Install and Load the packages needed for the analysis, results = 'hide', message = FALSE}
+source("packages.R")
+```
+
+The packages needed for the analysis will be automatically installed (if they aren't installed yet) and loaded.
+
+```{r Detect number of cores and register number of cores for usage in parallel computation, results = 'hide'}
+registerDoMC(cores = detectCores()-1) 
+```
+
+```{r Clean Workspace and read Muchlinski et al replication data}
+rm(list=ls())
+
+data <- read.csv(file="SambnisImp.csv") 
+```
+
+# Data Pre-processing
+
+```{r Select same variables as in Muchlinski et al. and convert DV to factor}
+df <- data[,c("warstds", "ager", "agexp", "anoc", "army85", "autch98", "auto4",
+              "autonomy", "avgnabo", "centpol3", "coldwar", "decade1", "decade2",
+              "decade3", "decade4", "dem", "dem4", "demch98", "dlang", "drel",
+              "durable", "ef", "ef2", "ehet", "elfo", "elfo2", "etdo4590",
+              "expgdp", "exrec", "fedpol3", "fuelexp", "gdpgrowth", "geo1", "geo2",
+              "geo34", "geo57", "geo69", "geo8", "illiteracy", "incumb", "infant",
+              "inst", "inst3", "life", "lmtnest", "ln_gdpen", "lpopns", "major", 
+              "manuexp", "milper", "mirps0", "mirps1", "mirps2", "mirps3", "nat_war", "ncontig",
+              "nmgdp", "nmdp4_alt", "numlang", "nwstate", "oil", "p4mchg",
+              "parcomp", "parreg", "part", "partfree", "plural", "plurrel",
+              "pol4", "pol4m", "pol4sq", "polch98", "polcomp", "popdense",
+              "presi", "pri", "proxregc", "ptime", "reg", "regd4_alt", "relfrac", 
+              "seceduc","second", "semipol3", "sip2", "sxpnew", "sxpsq", 
+              "tnatwar", "trade", "warhist", "xconst")]
+
+# Converting DV into Factor with names for Caret Library
+
+df$warstds<-factor(
+  df$warstds,
+  levels=c(0,1),
+  labels=c("peace", "war"))
+```
+
+```{r Split dataset into training and test data}
+dfTrain <- df[data$year < 1990,]
+dfTest <- df[data$year >= 1990,]
+```
+
+# Training the models
+
+All models are trained using the `caret` R-package.
+
+## Setting up train control
+
+```{r Set training control for caret models}
+# create a list of seesd, here change the seed for each resampling
+set.seed(221)
+
+# length is = (n_repeats*nresampling)+1
+seeds <- vector(mode = "list", length = 11)
+
+#3 is the number of tuning parameters, mtry for rf
+for(i in 1:10) seeds[[i]]<- sample.int(n=1000, 3)
+
+#for the final model
+set.seed(221)
+seeds[[11]]<-sample.int(1000, 1)
+
+# Create folds
+folds <- 10
+cvIndex <- createFolds(factor(dfTrain$warstds), folds, returnTrain = T)
+
+tc <- trainControl(method = "cv", 
+                   number = folds,
+                   summaryFunction = twoClassSummary, 
+                   classProb = TRUE,
+                   savePredictions = TRUE,
+                   seeds = seeds,
+                   index = cvIndex
+)
+```
+
+## The models with the Fearon/Laitin variables.
+
+First, we train the Logit and Random Forest model using the eleven Fearon/Laitin variables. And have a brief first look at the results.
+
+### Logit
+```{r The Fearon/Laitin Logit model, results = 'hide'}
+modelFLlogit <- train(warstds ~ warhist + ln_gdpen + lpopns + lmtnest + ncontig + oil 
+                      + nwstate + inst3 + pol4 + ef + relfrac, 
+                      metric = "ROC", method = "glm", family = "binomial",
+                      trControl = tc, data = dfTrain
+                      )
+
+summary(modelFLlogit) # Not in paper
+
+modelFLlogit # Not in paper
+
+confusionMatrix(modelFLlogit, norm = "average") # Not in paper
+```
+
+### Random Forest
+```{r The Random Forest model using the Fearon/Laitin variables, results = 'hide'}
+modelFLrf <- train(warstds ~ warhist + ln_gdpen + lpopns + lmtnest + ncontig + oil 
+                   + nwstate + inst3 + pol4 + ef + relfrac, 
+                   metric = "ROC", method = "rf",
+                   trControl = tc, data = dfTrain,
+                   keep.inbag = TRUE
+                   )
+
+modelFLrf # Not in paper
+
+confusionMatrix(modelFLrf, norm = "average") # Not in paper
+```
+
+## The models using all 90 variables in the dataset.
+
+### Logit
+```{r The all variables Logit model, results = 'hide'}
+modelAlllogit <- train(warstds ~ ., 
+                      metric = "ROC", method = "glm", family = "binomial",
+                      trControl = tc, data = dfTrain
+)
+
+summary(modelAlllogit) # Not in paper
+
+modelAlllogit # Not in paper
+
+confusionMatrix(modelAlllogit, norm = "average") # Not in paper
+```
+
+### Random Forest
+```{r, results = 'hide'}
+modelAllrf <- train(warstds ~ ., 
+                   metric = "ROC", method = "rf",
+                   trControl = tc, data = dfTrain,
+                   keep.inbag = TRUE
+)
+
+modelAllrf # Not in paper
+
+confusionMatrix(modelAllrf, norm = "average") # Not in paper
+```
+
+## The plots and confusion matrices to compare the models
+
+### Entries for Table 1: Confusion Matrices for the models at a threshold for positive prediction of 0.5
+```{r Entries for Table 1}
+table(pred = predict(modelFLlogit, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelFLrf, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelAlllogit, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelAllrf, dfTest, type = "raw"), obs = dfTest$warstds)
+```
+
+### Figure 1: Separation Plots for the four models
+```{r Separation Plots for the models in the paper, fig.align = 'center', fig.height = 4, fig.width = 7}
+
+separationplot(predict(modelFLlogit, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2 = 1,
+               show.expected = T, 
+               heading = "Fearon and Laitin Variables (2003) Logit", 
+               height = 1.5, col0 = "white", col1 = "black", newplot = F)
+
+separationplot(predict(modelFLrf, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2 = 1,
+               show.expected = T, 
+               heading = "Fearon and Laitin Variables (2003) Random Forest", 
+               height = 1.5, col0 = "white", col1 = "black", newplot = F)
+
+separationplot(predict(modelAlllogit, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2 = 1,
+               show.expected = T, 
+               heading = "All Variables Logit", 
+               height = 1.5, col0 = "white", col1 = "black", newplot = F)
+
+separationplot(predict(modelAllrf, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2 = 1,
+               show.expected = T, 
+               heading = "All Variables Random Forest", 
+               height = 1.5, col0 = "white", col1 = "black", newplot = F)
+```
+
+### Figure 2: ROC curves for the four models
+```{r ROC curves for the models in the paper}
+plot.roc(dfTest$warstds,
+         predict(modelFLlogit, dfTest, type = "prob")$war,
+         col = "black", las = 1, xlim = c(1,0), bty = "n", 
+         main = "Out-of-sample ROC curves")
+
+plot.roc(dfTest$warstds,
+         predict(modelFLrf, dfTest, type = "prob")$war,
+         add = T,
+         col = "black", lty = "dashed")
+
+
+plot.roc(dfTest$warstds,
+         predict(modelAlllogit, dfTest, type = "prob")$war,
+         add = T,
+         col = "grey 50", lty = "solid")
+
+plot.roc(dfTest$warstds,
+         predict(modelAllrf, dfTest, type = "prob")$war,
+         add = T,
+         col = "grey 50", lty = "dashed")
+legend(0.7, 0.25, 
+       c(paste("Fearon and Laitin (2003) Logit, AUC = ", 
+               round(as.numeric(roc(dfTest$warstds,
+                                    predict(modelFLlogit, dfTest, type = "prob")$war)$auc),2)), 
+         paste("Fearon and Laitin (2003) Random Forest, AUC = ", 
+               round(as.numeric(roc(dfTest$warstds,
+                                    predict(modelFLrf, dfTest, type = "prob")$war)$auc),2)), 
+         paste("All Variables Logit, AUC = ", 
+               round(as.numeric(roc(dfTest$warstds,
+                                    predict(modelAlllogit, dfTest, type = "prob")$war)$auc),2)),  
+         paste("All Variables Random Forest, AUC = ", 
+               round(as.numeric(roc(dfTest$warstds,
+                                    predict(modelAllrf, dfTest, type = "prob")$war)$auc),2))), 
+       lty=c("solid", "dashed", "solid", "dashed"), 
+       col = c("black","black", "grey 50", "grey 50"), bty="n", 
+       cex = .75)
+
+
+```
+```{r Test for difference in ROCs and CIs for AUCs, results = 'hide'}
+
+rocFLlogit <- roc(dfTest$warstds,predict(modelFLlogit, dfTest, type = "prob")$war)
+rocFLrf <- roc(dfTest$warstds,predict(modelFLrf, dfTest, type = "prob")$war)
+
+rocAlllogit <- roc(dfTest$warstds,predict(modelAlllogit, dfTest, type = "prob")$war)
+rocAllrf <- roc(dfTest$warstds,predict(modelAllrf, dfTest, type = "prob")$war)
+
+set.seed(221)
+roc.test(rocAlllogit, rocAllrf, method = "bootstrap")
+
+set.seed(221)
+aucCIFLlogit <- ci.auc(rocFLlogit, method = "bootstrap")
+set.seed(221)
+aucCIFLrf <- ci.auc(rocFLrf, method = "bootstrap")
+set.seed(221)
+aucCIAlllogit <- ci.auc(rocAlllogit, method = "bootstrap")
+set.seed(221)
+aucCIAllrf <- ci.auc(rocAllrf, method = "bootstrap")
+```
+
+# Code for Appendix
+
+## The four models with up-sampling within the cross-validation procedure
+
+```{r, results = 'hide'}
+tcup <- trainControl(method = "cv", 
+                   number = folds,
+                   summaryFunction = twoClassSummary, 
+                   classProb = TRUE,
+                   savePredictions = TRUE,
+                   seeds = seeds,
+                   index = cvIndex,
+                   sampling = "up"
+)
+
+# The Fearon/Laitin models.
+
+# Logit
+modelFLlogitup <- train(warstds ~ warhist + ln_gdpen + lpopns + lmtnest + ncontig + oil 
+                        + nwstate + inst3 + pol4 + ef + relfrac, 
+                      metric = "ROC", method = "glm", family = "binomial",
+                      trControl = tcup, data = dfTrain
+)
+
+summary(modelFLlogitup) 
+
+modelFLlogitup 
+
+confusionMatrix(modelFLlogitup, norm = "average") 
+
+
+# Random Forest
+modelFLrfup <- train(warstds ~ warhist + ln_gdpen + lpopns + lmtnest + ncontig + oil 
+                     + nwstate + inst3 + pol4 + ef + relfrac, 
+                   metric = "ROC", method = "rf",
+                   trControl = tcup, data = dfTrain,
+                   keep.inbag = TRUE
+)
+
+modelFLrfup
+
+confusionMatrix(modelFLrfup, norm = "average")
+
+
+
+############
+
+# Logit
+modelAlllogitup <- train(warstds ~ ., 
+                       metric = "ROC", method = "glm", family = "binomial",
+                       trControl = tcup, data = dfTrain
+)
+
+summary(modelAlllogitup) 
+
+modelAlllogitup 
+
+confusionMatrix(modelAlllogitup, norm = "average") 
+
+
+# Random Forest
+modelAllrfup <- train(warstds ~ ., 
+                    metric = "ROC", method = "rf",
+                    trControl = tcup, data = dfTrain,
+                    keep.inbag = TRUE
+)
+
+modelAllrfup
+
+confusionMatrix(modelAllrfup, norm = "average")
+```
+
+
+## Confusion Matrices
+
+```{r}
+table(pred = predict(modelFLlogitup, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelFLrfup, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelAlllogitup, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelAllrfup, dfTest, type = "raw"), obs = dfTest$warstds)
+```
+
+
+
+## Separation Plots and ROC curves for the models with up-sampling
+
+```{r fig.align = 'center', fig.height = 4, fig.width = 7}
+
+separationplot(predict(modelFLlogitup, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2=1,
+               show.expected=T, 
+               heading="Fearon and Laitin (2003) Logit with up-sampling", 
+               height=1.5, col0="white", col1="black",newplot = F)
+separationplot(predict(modelFLrfup, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2=1,
+               show.expected=T, 
+               heading="Fearon and Laitin (2003) Random Forest with up-sampling", 
+               height=1.5, col0="white", col1="black",newplot = F)
+separationplot(predict(modelAlllogitup, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2=1,
+               show.expected=T, 
+               heading="All Variables Logit with up-sampling", 
+               height=1.5, col0="white", col1="black",newplot = F)
+separationplot(predict(modelAllrfup, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2=1,
+               show.expected=T, 
+               heading="All Variables Random Forest with up-sampling", 
+               height=1.5, col0="white", col1="black",newplot = F)
+
+```
+
+```{r}
+plot.roc(dfTest$warstds,
+         predict(modelFLlogitup, dfTest, type = "prob")$war,
+         col = "grey 80", las = 1, xlim = c(1,0), bty = "n", 
+         main = "Out-of-sample ROC curves with up-sampling")
+
+plot.roc(dfTest$warstds,
+         predict(modelFLrfup, dfTest, type = "prob")$war,
+         add = T,
+         col = "grey 80", lty = "dashed")
+
+
+plot.roc(dfTest$warstds,
+         predict(modelAlllogitup, dfTest, type = "prob")$war,
+         add = T,
+         col = "grey 50", lty = "solid")
+
+plot.roc(dfTest$warstds,
+         predict(modelAllrfup, dfTest, type = "prob")$war,
+         add = T,
+         col = "grey 50", lty = "dashed")
+legend(0.7, 0.25, 
+       c(paste("Fearon and Laitin (2003) Logit, AUC = ", 
+               round(as.numeric(roc(dfTest$warstds,
+                                    predict(modelFLlogitup, dfTest, type = "prob")$war)$auc),2)), 
+         paste("Fearon and Laitin (2003) Random Forest, AUC = ", 
+               round(as.numeric(roc(dfTest$warstds,
+                                    predict(modelFLrfup, dfTest, type = "prob")$war)$auc),2)), 
+         paste("All Variables Logit, AUC = ", 
+               round(as.numeric(roc(dfTest$warstds,
+                                    predict(modelAlllogitup, dfTest, type = "prob")$war)$auc),2)),  
+         paste("All Variables Random Forest, AUC = ", 
+               round(as.numeric(roc(dfTest$warstds,
+                                    predict(modelAllrfup, dfTest, type = "prob")$war)$auc),2))), 
+       lty=c("solid", "dashed", "solid", "dashed"), 
+       col = c("black","black", "grey 50", "grey 50"), bty="n", 
+       cex = .75)
+```
+
+## The four models with down-sampling within the cross-validation procedure
+
+```{r The four models using down-sampling, results = 'hide'}
+tcdown <- trainControl(method = "cv", 
+                   number = folds,
+                   summaryFunction = twoClassSummary, 
+                   classProb = TRUE,
+                   savePredictions = TRUE,
+                   seeds = seeds,
+                   index = cvIndex,
+                   sampling = "down"
+)
+
+# The Fearon/Laitin models.
+
+# Logit
+modelFLlogitdown <- train(warstds ~ warhist + ln_gdpen + lpopns + lmtnest + ncontig + oil 
+                          + nwstate + inst3 + pol4 + ef + relfrac, 
+                      metric = "ROC", method = "glm", family = "binomial",
+                      trControl = tcdown, data = dfTrain
+)
+
+summary(modelFLlogitdown) 
+
+modelFLlogitdown
+
+confusionMatrix(modelFLlogitdown, norm = "average") 
+
+
+# Random Forest
+modelFLrfdown <- train(warstds ~ warhist + ln_gdpen + lpopns + lmtnest + ncontig + oil 
+                       + nwstate + inst3 + pol4 + ef + relfrac, 
+                   metric = "ROC", method = "rf",
+                   trControl = tcdown, data = dfTrain,
+                   keep.inbag = TRUE
+)
+
+modelFLrfdown
+
+confusionMatrix(modelFLrfdown, norm = "average")
+
+
+
+############
+
+# Logit
+modelAlllogitdown <- train(warstds ~ ., 
+                       metric = "ROC", method = "glm", family = "binomial",
+                       trControl = tcdown, data = dfTrain
+)
+
+summary(modelAlllogitdown) 
+
+modelAlllogitdown 
+
+confusionMatrix(modelAlllogitdown, norm = "average") 
+
+
+# Random Forest
+modelAllrfdown <- train(warstds ~ ., 
+                    metric = "ROC", method = "rf",
+                    trControl = tcdown, data = dfTrain,
+                    keep.inbag = TRUE
+)
+
+modelAllrfdown
+
+confusionMatrix(modelAllrfdown, norm = "average")
+```
+
+
+## Confusion Matrices
+
+```{r}
+table(pred = predict(modelFLlogitdown, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelFLrfdown, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelAlllogitdown, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelAllrfdown, dfTest, type = "raw"), obs = dfTest$warstds)
+```
+
+
+
+## Separation Plots and ROC curves for the models with down-sampling
+
+```{r fig.align = 'center', fig.height = 4, fig.width = 7}
+
+separationplot(predict(modelFLlogitdown, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2=1,
+               show.expected=T, 
+               heading="Fearon and Laitin (2003) Logit with down-sampling", 
+               height=1.5, col0="white", col1="black",newplot = F)
+
+separationplot(predict(modelFLrfdown, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2=1,
+               show.expected=T, 
+               heading="Fearon and Laitin (2003) Random Forest with down-sampling", 
+               height=1.5, col0="white", col1="black",newplot = F)
+
+separationplot(predict(modelAlllogitdown, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2=1,
+               show.expected=T, 
+               heading="All Variables Logit with down-sampling", 
+               height=1.5, col0="white", col1="black",newplot = F)
+
+separationplot(predict(modelAllrfdown, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2=1,
+               show.expected=T, 
+               heading="All Variables Random Forest with down-sampling", 
+               height=1.5, col0="white", col1="black",newplot = F)
+
+```
+
+```{r}
+plot.roc(dfTest$warstds,
+         predict(modelFLlogitdown, dfTest, type = "prob")$war,
+         col = "grey 80", las = 1, xlim = c(1,0), bty = "n", main = "Out-of-sample ROC curves with down-sampling")
+
+plot.roc(dfTest$warstds,
+         predict(modelFLrfdown, dfTest, type = "prob")$war,
+         add = T,
+         col = "grey 80", lty = "dashed")
+
+
+plot.roc(dfTest$warstds,
+         predict(modelAlllogitdown, dfTest, type = "prob")$war,
+         add = T,
+         col = "grey 50", lty = "solid")
+
+plot.roc(dfTest$warstds,
+         predict(modelAllrfdown, dfTest, type = "prob")$war,
+         add = T,
+         col = "grey 50", lty = "dashed")
+legend(0.7, 0.25, 
+       c(paste("Fearon and Laitin (2003) Logit, AUC = ", 
+               round(as.numeric(roc(dfTest$warstds,
+                                    predict(modelFLlogitdown, dfTest, type = "prob")$war)$auc),2)), 
+         paste("Fearon and Laitin (2003) Random Forest, AUC = ", 
+               round(as.numeric(roc(dfTest$warstds,
+                                    predict(modelFLrfdown, dfTest, type = "prob")$war)$auc),2)), 
+         paste("All Variables Logit, AUC = ", 
+               round(as.numeric(roc(dfTest$warstds,
+                                    predict(modelAlllogitdown, dfTest, type = "prob")$war)$auc),2)),  
+         paste("All Variables Random Forest, AUC = ", 
+               round(as.numeric(roc(dfTest$warstds,
+                                    predict(modelAllrfdown, dfTest, type = "prob")$war)$auc),2))), 
+       lty=c("solid", "dashed", "solid", "dashed"), 
+       col = c("black","black", "grey 50", "grey 50"), bty="n", 
+       cex = .75)
+```
+
+
+## Collier/Hoeffler Logit
+```{r The Collier/Hoeffler Logit model, results = 'hide'}
+modelCHlogit <- train(warstds ~ sxpnew+sxpsq+ln_gdpen+gdpgrowth+warhist+lmtnest+ef
+                      +popdense+lpopns+coldwar+seceduc+ptime, 
+                      metric = "ROC", method = "glm", family = "binomial",
+                      trControl = tc, data = dfTrain
+                      )
+
+summary(modelCHlogit) # Not in paper
+
+modelCHlogit # Not in paper
+
+confusionMatrix(modelCHlogit, norm = "average") # Not in paper
+```
+
+### Collier/Hoeffler Random Forest
+```{r The Random Forest model using the Collier/Hoeffler variables, results = 'hide'}
+modelCHrf <- train(warstds ~ sxpnew+sxpsq+ln_gdpen+gdpgrowth+warhist+lmtnest+ef+popdense
+                  +lpopns+coldwar+seceduc+ptime, 
+                   metric = "ROC", method = "rf",
+                   trControl = tc, data = dfTrain,
+                   keep.inbag = TRUE
+                   )
+
+modelCHrf # Not in paper
+
+confusionMatrix(modelCHrf, norm = "average") # Not in paper
+```
+
+
+## The plots and confusion matrices to compare the models. Collier/Hoeffler vs. all 90 variables
+
+### Confusion Matrices for the models at a threshold for positive prediction of 0.5
+```{r Confusion Matrices with Collier/Hoeffler specifications}
+table(pred = predict(modelCHlogit, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelCHrf, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelAlllogit, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelAllrf, dfTest, type = "raw"), obs = dfTest$warstds)
+```
+
+### Separation Plots for the four models (Collier/Hoeffler)
+```{r Separation Plots for the models with the Collier/Hoeffler variables, fig.align = 'center', fig.height = 4, fig.width = 7}
+
+separationplot(predict(modelCHlogit, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2 = 1,
+               show.expected = T, 
+               heading = "Collier and Hoeffler Variables (2004) Logit", 
+               height = 1.5, col0 = "white", col1 = "black", newplot = F)
+
+separationplot(predict(modelCHrf, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2 = 1,
+               show.expected = T, 
+               heading = "Collier and Hoeffler Variables (2004) Random Forest", 
+               height = 1.5, col0 = "white", col1 = "black", newplot = F)
+
+separationplot(predict(modelAlllogit, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2 = 1,
+               show.expected = T, 
+               heading = "All Variables Logit", 
+               height = 1.5, col0 = "white", col1 = "black", newplot = F)
+
+separationplot(predict(modelAllrf, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2 = 1,
+               show.expected = T, 
+               heading = "All Variables Random Forest", 
+               height = 1.5, col0 = "white", col1 = "black", newplot = F)
+```
+
+### ROC curves for the four models (Collier/Hoeffler)
+```{r ROC curves for the Collier/Hoeffler specifications}
+plot.roc(dfTest$warstds,
+         predict(modelCHlogit, dfTest, type = "prob")$war,
+         col = "grey 80", las = 1, xlim = c(1,0), bty = "n", 
+         main = "Out-of-sample ROC curves")
+
+plot.roc(dfTest$warstds,
+         predict(modelCHrf, dfTest, type = "prob")$war,
+         add = T,
+         col = "grey 80", lty = "dashed")
+
+
+plot.roc(dfTest$warstds,
+         predict(modelAlllogit, dfTest, type = "prob")$war,
+         add = T,
+         col = "grey 50", lty = "solid")
+
+plot.roc(dfTest$warstds,
+         predict(modelAllrf, dfTest, type = "prob")$war,
+         add = T,
+         col = "grey 50", lty = "dashed")
+legend(0.5, 0.25, c("Collier and Hoeffler (2004) Logit", 
+                    "Collier and Hoeffler (2004) Random Forest", 
+                     "All Variables Logit",
+                    "All Variables Random Forest" ), 
+       lty=c("solid", "dashed", "solid", "dashed"), 
+       col = c("grey 80","grey 80", "grey 50", "grey 50"), bty="n", 
+       cex = .75)
+```
+
+## Hegre/Sambanis model specifications
+
+### Logit
+```{r The Hegre/Sambanis Logit model, results = 'hide'}
+modelHSlogit <- train(warstds ~ lpopns+ln_gdpen+inst3+parreg+geo34+proxregc+gdpgrowth
+                      +anoc+partfree+nat_war+lmtnest+decade1+pol4sq+nwstate
+                      +regd4_alt+etdo4590+milper+geo1+tnatwar+presi, 
+                      metric = "ROC", method = "glm", family = "binomial",
+                      trControl = tc, data = dfTrain
+                      )
+
+summary(modelHSlogit) # Not in paper
+
+modelHSlogit # Not in paper
+
+confusionMatrix(modelHSlogit, norm = "average") # Not in paper
+```
+
+### Random Forest
+```{r The Random Forest model using the Hegre/Sambanis variables, results = 'hide'}
+modelHSrf <- train(warstds ~ lpopns+ln_gdpen+inst3+parreg+geo34+proxregc+gdpgrowth+anoc
+                   +partfree+nat_war+lmtnest+decade1+pol4sq+nwstate+regd4_alt+etdo4590
+                   +milper+geo1+tnatwar+presi, 
+                   metric = "ROC", method = "rf",
+                   trControl = tc, data = dfTrain,
+                   keep.inbag = TRUE
+                   )
+
+modelHSrf # Not in paper
+
+confusionMatrix(modelHSrf, norm = "average") # Not in paper
+```
+
+
+## The plots and confusion matrices to compare the models. Hegre/Sambanis vs. all 90 variables
+
+### Confusion Matrices for the models at a threshold for positive prediction of 0.5
+```{r Confusion Matrices with Hegre/Sambanis specifications}
+table(pred = predict(modelHSlogit, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelHSrf, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelAlllogit, dfTest, type = "raw"), obs = dfTest$warstds)
+table(pred = predict(modelAllrf, dfTest, type = "raw"), obs = dfTest$warstds)
+```
+
+### Separation Plots for the four models (Hegre/Sambanis)
+```{r Separation Plots for the models with the Hegre/Sambanis variables, fig.align = 'center', fig.height = 4, fig.width = 7}
+
+separationplot(predict(modelHSlogit, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2 = 1,
+               show.expected = T, 
+               heading = "Hegre and Sambanis Variables (2006) Logit", 
+               height = 1.5, col0 = "white", col1 = "black", newplot = F)
+
+separationplot(predict(modelHSrf, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2 = 1,
+               show.expected = T, 
+               heading = "Hegre and Sambanis Variables (2006) Random Forest", 
+               height = 1.5, col0 = "white", col1 = "black", newplot = F)
+
+separationplot(predict(modelAlllogit, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2 = 1,
+               show.expected = T, 
+               heading = "All Variables Logit", 
+               height = 1.5, col0 = "white", col1 = "black", newplot = F)
+
+separationplot(predict(modelAllrf, dfTest, type = "prob")$war, 
+               as.numeric(dfTest$warstds)-1, type = "line", 
+               line = T, lwd2 = 1,
+               show.expected = T, 
+               heading = "All Variables Random Forest", 
+               height = 1.5, col0 = "white", col1 = "black", newplot = F)
+```
+
+### ROC curves for the four models (Hegre/Sambanis)
+```{r ROC curves for the Hegre/Sambanis specifications}
+plot.roc(dfTest$warstds,
+         predict(modelHSlogit, dfTest, type = "prob")$war,
+         col = "grey 80", las = 1, xlim = c(1,0), bty = "n", 
+         main = "Out-of-sample ROC curves")
+
+plot.roc(dfTest$warstds,
+         predict(modelHSrf, dfTest, type = "prob")$war,
+         add = T,
+         col = "grey 80", lty = "dashed")
+
+
+plot.roc(dfTest$warstds,
+         predict(modelAlllogit, dfTest, type = "prob")$war,
+         add = T,
+         col = "grey 50", lty = "solid")
+
+plot.roc(dfTest$warstds,
+         predict(modelAllrf, dfTest, type = "prob")$war,
+         add = T,
+         col = "grey 50", lty = "dashed")
+legend(0.5, 0.25, c("Hegre and Sambanis (2006) Logit", 
+                    "Hegre and Sambanis (2006) Random Forest", 
+                    "All Variables Logit", 
+                    "All Variables Random Forest" ), 
+       lty=c("solid", "dashed", "solid", "dashed"), 
+       col = c("grey 80","grey 80", "grey 50", "grey 50"), bty="n", 
+       cex = .75)
+```
+
+
